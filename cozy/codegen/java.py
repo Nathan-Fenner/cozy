@@ -1,654 +1,440 @@
 from contextlib import contextmanager
+from collections import OrderedDict
 import itertools
 import json
+from typing import *
+
+import sys
+
+def debug(msg):
+    sys.stderr.write(repr(msg) + '\n')
 
 from cozy import common, evaluation
 from cozy.target_syntax import *
-from cozy.syntax_tools import free_vars, subst, is_scalar, all_exps
 from cozy.structures.arrays import TArray
+from cozy.structures import extension_handler
+from cozy.syntax import *
 
-from .cxx import CxxPrinter
 from .misc import *
 
-JAVA_PRIMITIVE_TYPES = {
-    "boolean", "byte", "char", "short", "int", "long", "float", "double"}
+JAVA_PRIMITIVE_TYPES = {"boolean", "byte", "char", "short", "int", "long", "float", "double"}
 
-class JavaPrinter(CxxPrinter):
+def bracketed(s: str):
+    return "{\n" + "\n".join(["\t" + line for line in s.split("\n")]) + "\n}"
 
-    def __init__(self, out, boxed : bool = True):
-        super().__init__(out=out)
-        self.boxed = boxed
+class JavaPrinter:
+    def __init__(self, out):
+        self.out = out
+        self.unique_counter = 0
+        self.needs_aux = {}
+    
+    def fresh_temporary(self, name = "temp"):
+        self.unique_counter += 1
+        return "{}{}".format(name, self.unique_counter)
 
-    @contextmanager
-    def boxed_mode(self):
-        oldboxed = self.boxed
-        self.boxed = True
-        yield
-        self.boxed = oldboxed
+    def render_complete(self, *, spec: Spec, state_map, share_info, abstract_state):
+        if len(share_info) != 0:
+            raise NotImplemented
+        
+        # debug(impl)
+        example_spec = Spec(
+            # name
+            'Basic',
+            # types
+            [],
+            # extern_funcs
+            [],
+            # statevars 
+            [
+                ('_var27', TBag(TInt())),
+                ('_var2428', TMap(TInt(), TBool())),
+                ('_var14938', TMap(TInt(), TInt())),
+            ],
+            # assumptions
+            [],
+            # methods 
+            [
+                Query('elems', 'public', [], (), EVar('_var27').with_type(TBag(TInt())), ''),
+                Query('_query42', 'internal', [('n', TInt())], (), ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), '[add] additions to _var27'),
+                Query('_query43', 'internal', [('n', TInt())], (), EEmptyList().with_type(TBag(TInt())), '[add] deletions from _var27'),
+                Query('_query92', 'internal', [('n', TInt())], (), ECond(EHasKey(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('n').with_type(TInt())).with_type(TBool()), ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), EEmptyList().with_type(TBag(TInt()))).with_type(TBag(TInt())), '[remove] deletions from _var27'),
+                Query('_query2702', 'internal', [('n', TInt())], (), EFilter(ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), ELambda(EVar('_var2601').with_type(TInt()), EUnaryOp('not', EHasKey(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var2601').with_type(TInt())).with_type(TBool())).with_type(TBool()))).with_type(TBag(TInt())), '[add] new or modified keys from _var2428'),
+                Query('_query3619', 'internal', [('n', TInt())], (), ECond(EBinOp(EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('n').with_type(TInt())).with_type(TInt()), '==', ENum(1).with_type(TInt())).with_type(TBool()), ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), EEmptyList().with_type(TBag(TInt()))).with_type(TBag(TInt())), '[remove] keys removed from _var2428'),
+                Query('_query15748', 'internal', [('n', TInt()), ('_var15437', TInt()), ('_var15438', TInt())], (), EBinOp(EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt())).with_type(TInt()), '+', ENum(1).with_type(TInt())).with_type(TInt()), '[add] new value for _var15438'),
+                Query('_query19227', 'internal', [('n', TInt()), ('_var18920', TInt()), ('_var18921', TInt())], (), EBinOp(EVar('_var18921').with_type(TInt()), '-', ENum(1).with_type(TInt())).with_type(TInt()), '[remove] new value for _var18921'),
+                Query('_query19231', 'internal', [('n', TInt())], (), EFilter(EUnaryOp('distinct', EBinOp(EVar('_var27').with_type(TBag(TInt())), '-', ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt()))).with_type(TBag(TInt()))).with_type(TBag(TInt())), ELambda(EVar('_var18920').with_type(TInt()), EBinOp(EBool(False).with_type(TBool()), 'or', EUnaryOp('not', EBinOp(EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var18920').with_type(TInt())).with_type(TInt()), '==', EUnaryOp('len', EFilter(EFilter(EVar('_var27').with_type(TBag(TInt())), ELambda(EVar('_var65248').with_type(TInt()), EUnaryOp('not', EBinOp(EVar('_var65248').with_type(TInt()), '==', EVar('n').with_type(TInt())).with_type(TBool())).with_type(TBool()))).with_type(TBag(TInt())), ELambda(EVar('_var13489').with_type(TInt()), EBinOp(EVar('_var18920').with_type(TInt()), '==', EVar('_var13489').with_type(TInt())).with_type(TBool()))).with_type(TBag(TInt()))).with_type(TInt())).with_type(TBool())).with_type(TBool())).with_type(TBool()))).with_type(TBag(TInt())), '[remove] new or modified keys from _var14938'),
+                Op('add', [('n', TInt())], [], SSeq(SSeq(SDecl('_var220817', ECall('_query2702', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))), SDecl('_var220819', EMakeMap2(ECall('_query42', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), ELambda(EVar('_var15437').with_type(TInt()), ECall('_query15748', (EVar('n').with_type(TInt()), EVar('_var15437').with_type(TInt()), EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt())).with_type(TInt()))).with_type(TInt()))).with_type(TMap(TInt(), TInt())))), SSeq(SSeq(SForEach(EVar('_var2601').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapDel(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var2601').with_type(TInt()))), SForEach(EVar('_var2601').with_type(TInt()), EVar('_var220817').with_type(TBag(TInt())), SMapUpdate(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var2601').with_type(TInt()), EVar('_var2602').with_type(TBool()), SNoOp()))), SSeq(SSeq(SForEach(EVar('_var15437').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapDel(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt()))), SForEach(EVar('_var15437').with_type(TInt()), ECall('_query42', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapUpdate(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt()), EVar('_var15438').with_type(TInt()), SAssign(EVar('_var15438').with_type(TInt()), EMapGet(EVar('_var220819').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt())).with_type(TInt()))))), SSeq(SForEach(EVar('_var44').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'remove', (EVar('_var44').with_type(TInt()),))), SForEach(EVar('_var44').with_type(TInt()), ECall('_query42', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'add', (EVar('_var44').with_type(TInt()),))))))), ''),
+                Op('remove', [('n', TInt())], [], SSeq(SSeq(SDecl('_var220820', ECall('_query3619', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))), SSeq(SDecl('_var220821', ECall('_query19231', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))), SDecl('_var220822', ECall('_query92', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))))), SSeq(SSeq(SForEach(EVar('_var3617').with_type(TInt()), ECall('_query3619', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapDel(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var3617').with_type(TInt()))), SForEach(EVar('_var3617').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapUpdate(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var3617').with_type(TInt()), EVar('_var3618').with_type(TBool()), SNoOp()))), SSeq(SSeq(SForEach(EVar('_var18920').with_type(TInt()), EVar('_var220820').with_type(TBag(TInt())), SMapDel(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var18920').with_type(TInt()))), SForEach(EVar('_var18920').with_type(TInt()), EVar('_var220821').with_type(TBag(TInt())), SMapUpdate(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var18920').with_type(TInt()), EVar('_var18921').with_type(TInt()), SAssign(EVar('_var18921').with_type(TInt()), ECall('_query19227', (EVar('n').with_type(TInt()), EVar('_var18920').with_type(TInt()), EVar('_var18921').with_type(TInt()))).with_type(TInt()))))), SSeq(SForEach(EVar('_var93').with_type(TInt()), EVar('_var220822').with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'remove', (EVar('_var93').with_type(TInt()),))), SForEach(EVar('_var93').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'add', (EVar('_var93').with_type(TInt()),))))))), ''),
+            ],
+            # header
+            '',
+            # footer
+            '',
+            # docstring
+            ''
+        )
+        if len(spec.types) > 0:
+            raise NotImplemented
+        if len(spec.extern_funcs) > 0:
+            raise NotImplemented
+        if len(spec.assumptions) > 0:
+            raise NotImplemented
+        if len(spec.header) > 0:
+            raise NotImplemented
+        if len(spec.footer) > 0:
+            raise NotImplemented
+        if len(spec.docstring) > 0:
+            raise NotImplemented
+        # debug(state_map)
+        example_state_map = OrderedDict([
+            (
+                '_var27',
+                EVar('l').with_type(TBag(TInt()))
+            ),
+            (
+                '_var2428',
+                EMakeMap2(
+                    EVar('l').with_type(TBag(TInt())),
+                    ELambda(EVar('_var2010').with_type(TInt()), EBool(True).with_type(TBool()))
+                ).with_type(TMap(TInt(), TBool()))
+            ),
+            (
+                '_var14938',
+                EMakeMap2(
+                    EVar('l').with_type(TBag(TInt())),
+                    ELambda(
+                        EVar('_var13488').with_type(TInt()),
+                        EUnaryOp('len',
+                            EFilter(
+                                EVar('l').with_type(TBag(TInt())),
+                                ELambda(
+                                    EVar('_var13489').with_type(TInt()),
+                                    EBinOp(EVar('_var13488').with_type(TInt()), '==', EVar('_var13489').with_type(TInt())).with_type(TBool())
+                                )
+                            ).with_type(TBag(TInt()))
+                        ).with_type(TInt())
+                    )
+                ).with_type(TMap(TInt(), TInt()))
+            ),
+        ])
+        
+        # debug(share_info)
+        # defaultdict(<class 'list'>, {})
+        if len(share_info) > 0:
+            raise NotImplemented
+        
+        # debug(abstract_state)
+        # [('l', TBag(TInt()))]
 
-    def visit_Spec(self, spec, state_exps, sharing, abstract_state=()):
-        self.state_exps = state_exps
-        self.funcs = { f.name: f for f in spec.extern_funcs }
-        self.queries = { q.name: q for q in spec.methods if isinstance(q, Query) }
-        self.vars = set(e.id for e in all_exps(spec) if isinstance(e, EVar))
-        self.setup_types(spec, state_exps, sharing)
 
-        if spec.header:
-            self.write(spec.header.strip() + "\n\n")
+        self.out.write("class {name} {body}".format(
+            name = spec.name,
+            body = bracketed(self.render_spec(spec)),
+        ))
+    
+    def render_spec(self, spec: Spec):
+        out = ""
 
-        if spec.docstring:
-            self.write(spec.docstring + "\n")
+        out += "// state vars\n"
+        for statevar in spec.statevars:
+            out += self.render_statevar(statevar) + "\n"
+        
+        out += "// methods\n"
+        for method in spec.methods:
+            if type(method) is Query:
+                out += self.render_query(method) + "\n"
+            elif type(method) is Op:
+                out += self.render_op(method) + "\n"
+            else:
+                raise NotImplementedError
 
-        self.write("public class {} implements java.io.Serializable ".format(spec.name))
-        with self.block():
+        for need in self.needs_aux:
+            out += "// needs auxilliary '{}'\n".format(need)
 
-            for name, t in spec.types:
-                self.types[t] = name
+        return out
+    
+    def render_query(self, query: Query):
+        visibility = "private"
+        if query.visibility == "public":
+            visibility = "public"
+        return "{visibility} {name}({args}) {body}".format(
+            name = query.name,
+            args = self.render_args(query.args),
+            body = self.render_expr_return_block(query.ret),
+            visibility = visibility,
+        )
+    
+    def combine_code(self, *args):
+        pieces = [piece for piece in args if piece is not None]
+        if len(pieces) == 0:
+            return None
+        return "\n".join(pieces)
 
-            # member variables
-            for name, t in spec.statevars:
-                self.write("{}protected {};\n".format(INDENT, self.visit(t, name)))
+    def render_expr(self, expr: Exp, mapping) -> Tuple[Optional[str], str]:
+        # returns a pair of (setup_code, inline_string).
+        # The setup code is several statements, and the inline_string is one Java expression.
+        if type(expr) is EVar:
+            if expr.id in mapping:
+                return None, mapping[expr.id]
+            return None, "{}".format(expr.id)
+        elif type(expr) is ECall:
+            pieces = [self.render_expr(arg, mapping) for arg in expr.args]
+            setups = [s[0] for s in pieces if s[0] is not None]
+            if len(setups) == 0:
+                setups = None
+            else:
+                setups = "\n".join(setups)
+            inlines = [s[1] for s in pieces]
+            return setups, "{}({})".format(expr.func, ", ".join(inlines))
+        elif type(expr) is EBinOp:
+            if expr.op == "or":
+                if type(expr.e1) is EBool:
+                    if expr.e1.val:
+                        # absorbs
+                        return self.render_expr(expr.e1, mapping)
+                    else:
+                        # identity
+                        return self.render_expr(expr.e2, mapping)
+                if type(expr.e2) is EBool:
+                    if expr.e2.val:
+                        # absorbs
+                        return self.render_expr(expr.e2, mapping)
+                    else:
+                        # identity
+                        return self.render_expr(expr.e1, mapping)
+            (left_setup, left_inline) = self.render_expr(expr.e1, mapping)
+            (right_setup, right_inline) = self.render_expr(expr.e2, mapping)
+            if expr.op == "-" and type(expr.e1.type) is TBag:
+                self.needs_aux["bagDifference"] = True
+                return self.combine_code(left_setup, right_setup), "bagDifference({}, {})".format(left_inline, right_inline)
+            op = expr.op
+            replace = {
+                "or": "||",
+                "and": "&&",
+            }
+            if op in replace:
+                op = replace[op]
+            return self.combine_code(left_setup, right_setup), "({} {} {})".format(left_inline, op, right_inline)
+        elif type(expr) is EUnaryOp:
+            arg_setup, arg_inline = self.render_expr(expr.e, mapping)
+            if expr.op == "distinct" and type(expr.e.type) is TBag:
+                self.needs_aux["bagDistinct"] = True
+                return arg_setup, "bagDistinct({})".format(arg_inline)
+            if expr.op == "not":
+                if type(expr.e) is EBinOp and expr.e.op == "==":
+                    return self.render_expr(EBinOp(expr.e.e1, "!=", expr.e.e2).with_type(expr.type), mapping)
+                return arg_setup, "(!" + arg_inline + ")"
+            if expr.op == "len":
+                return arg_setup, "{}.size()".format(arg_inline)
+            return arg_setup, "(" + expr.op + " " + arg_inline + ")"
+        elif type(expr) is EBool:
+            if expr.val:
+                return None, "true"
+            else:
+                return None, "false"
+        elif type(expr) is ECond:
+            cond_setup, cond_inline = self.render_expr(expr.cond, mapping)
+            then_setup, then_inline = self.render_expr(expr.then_branch, mapping)
+            else_setup, else_inline = self.render_expr(expr.else_branch, mapping)
+            fresh = self.fresh_temporary()
+            return self.combine_code(cond_setup, "{temp_type} {temp_name};\nif ({cond_inline}) {then_branch} else {else_branch}".format(
+                temp_name = fresh,
+                temp_type = self.render_type(expr.type),
+                cond_inline = cond_inline,
+                then_branch = bracketed(self.combine_code(then_setup, "{} = {};".format(fresh, then_inline))),
+                else_branch = bracketed(self.combine_code(else_setup, "{} = {};".format(fresh, else_inline))),
+            )), fresh
+        elif type(expr) is EHasKey:
+            map_setup, map_inline = self.render_expr(expr.map, mapping)
+            key_setup, key_inline = self.render_expr(expr.key, mapping)
+            return self.combine_code(map_setup, key_setup), "{}.containsKey({})".format(map_inline, key_inline)
+        elif type(expr) is ELambda:
+            raise RuntimeError("unexpected bare ELambda (should only occur in map/filter)")
+        elif type(expr) is EMapGet:
+            map_setup, map_inline = self.render_expr(expr.map, mapping)
+            key_setup, key_inline = self.render_expr(expr.key, mapping)
+            return self.combine_code(map_setup, key_setup), "{}.get({})".format(map_inline, key_inline)
+        elif type(expr) is ENum:
+            return None, "{}".format(expr.val)
+        elif type(expr) is ESingleton:
+            singleton = self.fresh_temporary("singleton")
+            item_setup, item_inline = self.render_expr(expr.e, mapping)
+            return self.combine_code(
+                item_setup,
+                "{type} {name} = new {type}();".format(type = self.render_type(expr.type), name = singleton),
+                "{name}.add({item});".format(name = singleton, item = item_inline),
+            ), singleton
+        elif type(expr) is EFilter:
+            # first, build the bag
+            bag_setup, bag_inline = self.render_expr(expr.e, mapping)
+            if type(expr.p) is not ELambda:
+                raise RuntimeError("EFilter with non-lambda filter")
+            result = self.fresh_temporary("filtered")
+            item = self.fresh_temporary("item")
 
-            # constructor
-            self.write(
-                "{indent}public {name}() {{\n{indent2}clear();\n{indent}}}\n\n"
-                .format(indent=INDENT, indent2=INDENT+INDENT, name=spec.name))
+            new_mapping = {}
+            for v in mapping:
+                new_mapping[v] = mapping[v]
+            new_mapping[expr.p.arg.id] = item
+            lambda_setup, lambda_inline = self.render_expr(expr.p.body, new_mapping)
+            item_addition_code = self.combine_code(lambda_setup, "if ({cond}) {open_brace}\n\t{col}.add({item});\n{close_brace}".format(cond = lambda_inline, col = result, open_brace="{", close_brace="}", item = item))
+            filtering_code = "{result_type} {result} = new {result_type}();\nfor ({item_type} {item} : {bag_inline}) {inside}".format(
+                result_type = self.render_type(expr.type),
+                bag_inline = bag_inline,
+                item_type = self.render_type(expr.type.t),
+                result = result,
+                item = item,
+                inside = bracketed(item_addition_code),
+            )
+            return self.combine_code(bag_setup, filtering_code), result
+        elif type(expr) is EMakeMap2:
+            if type(expr.value) is not ELambda:
+                raise NotImplementedError
+            make = self.fresh_temporary("make")
+            keys_setup, keys_inline = self.render_expr(expr.e, mapping)
+            
+            key = self.fresh_temporary("key")
+            new_mapping = {}
+            for v in mapping:
+                new_mapping[v] = mapping[v]
+            new_mapping[expr.value.arg.id] = key
 
-            # explicit constructor
-            if abstract_state:
-                self.begin_statement()
-                self.write("public ", spec.name, "(")
-                self.visit_args(abstract_state)
-                self.write(") ")
-                with self.block():
-                    for name, t in spec.statevars:
-                        initial_value = state_exps[name]
-                        setup = self.construct_concrete(t, initial_value, EVar(name).with_type(t))
-                        self.visit(setup)
-                self.end_statement()
+            val_setup, val_inline = self.render_expr(expr.value.body, new_mapping)
+            body = bracketed(self.combine_code(
+                val_setup,
+                "{}.set({}, {});".format(make, key, val_inline)
+            ))
+            return self.combine_code(
+                keys_setup,
+                "{map_type} {make} = new {map_type}();".format(
+                    map_type = self.render_type(expr.type),
+                    make = make,
+                ),
+                "for ({key_type} {key_name} : {keys}) {body}".format(
+                    key_type = self.render_type(expr.value.arg.type),
+                    key_name = key,
+                    keys = keys_inline,
+                    body = body,
+                ),
+            ), make
+        elif type(expr) is EEmptyList:
+            return None, "new {}()".format(self.render_type(expr.type))
+        else:
+            debug(expr)
+            raise NotImplementedError
+    def render_expr_return_block(self, expr: Exp):
+        (setup, inline) = self.render_expr(expr, {})
+        return bracketed(self.combine_code(setup, "return {};".format(inline)))
 
-            # clear
-            self.write("{}public void clear() {{\n".format(INDENT, spec.name))
-            for name, t in spec.statevars:
-                initial_value = state_exps[name]
-                fvs = free_vars(initial_value)
-                initial_value = subst(initial_value,
-                    {v.id : evaluation.construct_value(v.type) for v in fvs})
-                setup = self.construct_concrete(t, initial_value, EVar(name).with_type(t))
-                self.visit(setup)
-            self.write("{}}}\n\n".format(INDENT))
+    def render_stmt(self, stmt: Stm):
+        if type(stmt) is SAssign:
+            if type(stmt.lhs) is not EVar:
+                raise NotImplementedError
+            rhs_setup, rhs_inline = self.render_expr(stmt.rhs, {})
+            return self.combine_code(rhs_setup, "{} = {};".format(stmt.lhs.id, rhs_inline))
+        elif type(stmt) is SCall:
+            if type(stmt.target) is not EVar:
+                raise NotImplementedError
+            call_setup, call_inline = self.render_expr(ECall(stmt.func, stmt.args).with_type(stmt.target.type), {})
+            return self.combine_code(call_setup, "{} = {};".format(stmt.target.id, call_inline))
+        elif type(stmt) is SDecl:
+            init_setup, init_inline = self.render_expr(stmt.val, {})
+            return self.combine_code(init_setup, "{} {} = {};".format(self.render_type(stmt.val.type), stmt.id, init_inline))
+        elif type(stmt) is SForEach:
+            iter_setup, iter_inline = self.render_expr(stmt.iter, {})
+            return self.combine_code(
+                iter_setup,
+                "for ({} {} : {}) {}".format(self.render_type(stmt.id.type), stmt.id.id, iter_inline, bracketed(self.render_stmt(stmt.body))),
+            )
+        elif type(stmt) is SMapDel:
+            map_setup, map_inline = self.render_expr(stmt.map, {})
+            key_setup, key_inline = self.render_expr(stmt.key, {})
+            return self.combine_code(
+                map_setup,
+                key_setup,
+                "{}.remove({});".format(map_inline, key_inline),
+            )
+        elif type(stmt) is SMapUpdate:
+            map_setup, map_inline = self.render_expr(stmt.map, {})
+            key_setup, key_inline = self.render_expr(stmt.key, {})
+            modify = self.render_stmt(stmt.change)
+            return self.combine_code(
+                map_setup,
+                key_setup,
+                "{} {} = {}.get({});".format(self.render_type(stmt.val_var.type), stmt.val_var.id, map_inline, key_inline),
+                modify,
+                "{}.set({}, {});".format(map_inline, key_inline, stmt.val_var.id),
+            )
+        elif type(stmt) is SNoOp:
+            return "/* no-op */"
+        elif type(stmt) is SSeq:
+            return self.combine_code(self.render_stmt(stmt.s1), self.render_stmt(stmt.s2))
+        else:
+            raise NotImplementedError
 
-            # methods
-            for op in spec.methods:
-                self.visit(op)
-
-            # generate auxiliary types
-            for t, name in self.types.items():
-                self.define_type(spec.name, t, name, sharing)
-
-        self.write("\n")
-        self.write(spec.footer)
-        if not spec.footer.endswith("\n"):
-            self.write("\n")
-
-    def visit_Op(self, q):
-        if q.docstring:
-            self.write(indent_lines(q.docstring, self.get_indent()), "\n")
-        self.begin_statement()
-        self.write("public void ", q.name, "(")
-        self.visit_args(q.args)
-        self.write(") ")
-        with self.block():
-            self.visit(q.body)
-        self.end_statement()
-
-    def visit_Query(self, q):
-        if q.visibility != Visibility.Public:
+    def render_args(self, args):
+        if len(args) == 0:
             return ""
-        ret_type = q.ret.type
-        if isinstance(ret_type, TBag):
-            x = EVar(self.fn("x")).with_type(ret_type.t)
-            def body(x):
-                return SEscape("{indent}_callback.accept({x});\n", ["x"], [x])
-            if q.docstring:
-                self.write(indent_lines(q.docstring, self.get_indent()), "\n")
-            self.begin_statement()
-            self.write("public ", self.visit(ret_type, q.name), "(")
-            self.visit_args(itertools.chain(q.args, [("_callback", TNative("java.util.function.Consumer<{t}>".format(t=self.visit(ret_type.t, ""))))]))
-            self.write(") ")
-            with self.block():
-                self.visit(SForEach(x, q.ret, SEscape("{indent}_callback({x});\n", ["x"], [x])))
+        return ", ".join([self.render_arg(arg) for arg in args])
+    
+    def render_arg(self, arg: Tuple[str, Type]):
+        return "{type} {name}".format(
+            type = self.render_type(arg[1]),
+            name = arg[0],
+        )
+    
+    def render_op(self, op: Op):
+        if len(op.assumptions) > 0:
+            raise NotImplementedError
+        if len(op.docstring) > 0:
+            raise NotImplementedError
+        return "public {name}({args}) {body}".format(
+            name = op.name,
+            args = self.render_args(op.args),
+            body = bracketed(self.render_stmt(op.body)),
+        )
+
+    def render_statevar(self, statevar: Tuple[str, Type]):
+        return "private {type} {name};".format(name = statevar[0], type = self.render_type(statevar[1]))
+    
+    def render_type(self, atype: Type):
+        if type(atype) is TInt:
+            return "Integer" # TODO: allow unboxed types when possible
+        elif type(atype) is TLong:
+            raise NotImplementedError
+        elif type(atype) is TFloat:
+            raise NotImplementedError
+        elif type(atype) is TBool:
+            return "Boolean" # TODO: allow unboxed types when possible.
+        elif type(atype) is TString:
+            return "String"
+        elif type(atype) is TNative:
+            raise NotImplementedError
+        elif type(atype) is THandle:
+            raise NotImplementedError
+        elif type(atype) is TBag:
+            # not really precise, but only sane implementation
+            return "java.util.ArrayList<{item}>".format(item = self.render_type(atype.t))
+        elif type(atype) is TSet:
+            return "java.util.HashSet<{key}>".format(key = self.render_type(atype.t))
+        elif type(atype) is TList:
+            return "java.util.ArrayList<{item}>".format(item = self.render_type(atype.t))
+        elif type(atype) is TMap:
+            return "java.util.HashMap<{key}, {val}>".format(key = self.render_type(atype.k), val = self.render_type(atype.v))
+        elif type(atype) is TNamed:
+            raise NotImplementedError
+        elif type(atype) is TRecord:
+            raise NotImplementedError
+        elif type(atype) is TApp:
+            raise NotImplementedError
+        elif type(atype) is TEnum:
+            raise NotImplementedError
+        elif type(atype) is TTuple:
+            raise NotImplementedError
         else:
-            if q.docstring:
-                self.write(indent_lines(q.docstring, self.get_indent()), "\n")
-            self.begin_statement()
-            self.write("public ", self.visit(ret_type, q.name), "(")
-            self.visit_args(q.args)
-            self.write(") ")
-            with self.block():
-                ret = self.visit(q.ret)
-                self.begin_statement()
-                self.write("return ", ret, ";")
-                self.end_statement()
-        self.end_statement()
+            raise NotImplementedError
 
-    def initialize_native_list(self, out):
-        init = "new {};\n".format(self.visit(out.type, name="()"))
-        return SEscape("{indent}{e} = " + init, ["e"], [out])
 
-    def initialize_native_set(self, out):
-        init = "new {};\n".format(self.visit(out.type, name="()"))
-        return SEscape("{indent}{e} = " + init, ["e"], [out])
 
-    def strip_generics(self, t : str):
-        import re
-        return re.sub("<.*>", "", t)
 
-    def div_by_64_and_round_up(self, e):
-        return EBinOp(EBinOp(EBinOp(e, "-", ONE).with_type(INT), ">>", ENum(6).with_type(INT)).with_type(INT), "+", ONE).with_type(INT)
 
-    def initialize_array(self, elem_type, len, out):
-        if elem_type == BOOL:
-            return SEscape("{indent}{out} = new long[{len}];\n", ["out", "len"], [out, self.div_by_64_and_round_up(len)])
-        return SEscape("{indent}{out} = new " + self.strip_generics(self.visit(elem_type, name="")) + "[{len}];\n", ["out", "len"], [out, len])
-
-    def initialize_native_map(self, out):
-        if out.type.k == INT:
-            return self.initialize_array(out.type.v, ENum(64).with_type(INT), out)
-        if self.use_trove(out.type):
-            if self.trovename(out.type.k) == "Object":
-                args = "64, 0.5f, {default}"
-            elif self.trovename(out.type.v) == "Object":
-                args = "64, 0.5f"
-            else:
-                args = "64, 0.5f, 0, {default}"
-            # args:
-            # int initialCapacity, float loadFactor, K noEntryKey, V noEntryValue
-            # loadFactor of 0.5 (trove's default) means map has 2x more buckets than entries
-            init = "new {}({});\n".format(self.visit(out.type, name=""), args)
-            return SEscape("{indent}{e} = " + init, ["e", "default"], [out, evaluation.construct_value(out.type.v)])
-        else:
-            init = "new {};\n".format(self.visit(out.type, name="()"))
-            return SEscape("{indent}{e} = " + init, ["e"], [out])
-
-    def visit_SEscapableBlock(self, s):
-        self.begin_statement()
-        self.write(s.label, ": do ")
-        with self.block():
-            self.visit(s.body)
-        self.write(" while (false);")
-        self.end_statement()
-
-    def visit_SEscapeBlock(self, s):
-        self.begin_statement()
-        self.write("break ", s.label, ";")
-        self.end_statement()
-
-    def visit_EMakeRecord(self, e):
-        args = [self.visit(v) for (f, v) in e.fields]
-        tname = self.typename(e.type)
-        return "new {}({})".format(tname, ", ".join(args))
-
-    def visit_ETuple(self, e):
-        name = self.typename(e.type)
-        args = [self.visit(arg) for arg in e.es]
-        return "new {}({})".format(name, ", ".join(args))
-
-    def visit_ENull(self, e):
-        return "null"
-
-    def visit_ENum(self, e):
-        suffix = ""
-        val = e.val
-        if e.type == LONG:
-            suffix = "L"
-        if e.type == FLOAT:
-            val = float(e.val)
-            suffix = "f"
-        return repr(e.val) + suffix
-
-    def visit_EEnumEntry(self, e):
-        return "{}.{}".format(self.typename(e.type), e.name)
-
-    def visit_ENative(self, e):
-        assert e.e == ENum(0), "cannot generate code for non-trivial native value"
-        return {
-            "boolean": "false",
-            "byte":    "(byte)0",
-            "char":    "'\\0'",
-            "short":   "(short)0",
-            "int":     "0",
-            "long":    "0L",
-            "float":   "0.0f",
-            "double":  "0.0",
-            }.get(e.type.name.strip(), "null")
-
-    def visit_EMove(self, e):
-        return self.visit(e.e)
-
-    def _eq(self, e1, e2):
-        if not self.boxed and self.is_primitive(e1.type):
-            return self.visit(EEscape("({e1} == {e2})", ("e1", "e2"), (e1, e2)).with_type(BOOL))
-        if is_scalar(e1.type):
-            return self.visit(EEscape("java.util.Objects.equals({e1}, {e2})", ["e1", "e2"], [e1, e2]).with_type(BOOL))
-        return super()._eq(e1, e2)
-
-    def test_set_containment_native(self, set : Exp, elem : Exp) -> (str, str):
-        return self.visit(EEscape("{set}.contains({elem})", ["set", "elem"], [set, elem]).with_type(BOOL))
-
-    def compute_hash_1(self, e : str, t : Type, out : EVar, indent : str) -> str:
-        if self.is_primitive(t):
-            if t == INT:
-                res = e
-            elif t == LONG:
-                res = "((int)({e})) ^ ((int)(({e}) >> 32))".format(e=e)
-            elif t == BOOL:
-                res = "({e}) ? 1 : 0".format(e=e)
-            elif t == FLOAT:
-                res = "Float.floatToIntBits({e})".format(e=e)
-            elif isinstance(t, TNative):
-                res = {
-                    "boolean": "{e} ? 1 : 0",
-                    "byte":    "{e}",
-                    "char":    "{e}",
-                    "short":   "{e}",
-                    "int":     "{e}",
-                    "long":    "((int)({e})) ^ ((int)(({e}) >> 32))",
-                    "float":   "Float.floatToIntBits({e})",
-                    "double":  "((int)(Double.doubleToRawLongBits({e}))) ^ ((int)((Double.doubleToRawLongBits({e})) >> 32))",
-                    }[t.name.strip()].format(e=e)
-            else:
-                raise NotImplementedError(t)
-        else:
-            res = "({}).hashCode()".format(e)
-        return "{indent}{out} = ({out} * 31) ^ ({res});\n".format(
-            indent=indent,
-            out=out.id,
-            res=res)
-
-    def compute_hash(self, fields : [(str, Type)]) -> (str, str):
-        indent = self.get_indent()
-        hc = self.fv(INT, "hash_code")
-        s = indent + "int " + hc.id + " = 0;\n"
-        for f, ft in fields:
-            s += self.compute_hash_1(f, ft, hc, indent)
-        return (s, hc.id)
-
-    def define_type(self, toplevel_name, t, name, sharing):
-        if isinstance(t, TEnum):
-            self.begin_statement()
-            self.write("public enum ", name, " ")
-            with self.block():
-                for case in t.cases:
-                    self.begin_statement()
-                    self.write(case)
-                    self.end_statement()
-            self.end_statement()
-        elif isinstance(t, THandle) or isinstance(t, TRecord):
-            public_fields = []
-            private_fields = []
-            value_equality = True
-            handle_val_is_this = False
-            if isinstance(t, THandle):
-                if isinstance(t.value_type, TRecord):
-                    handle_val_is_this = True
-                else:
-                    public_fields = [("val", t.value_type)]
-                value_equality = False
-                for group in sharing.get(t, []):
-                    for gt in group:
-                        intrusive_data = gt.intrusive_data(t)
-                        for (f, ft) in intrusive_data:
-                            private_fields.append((f, ft))
-            else:
-                public_fields = list(t.fields)
-            all_fields = public_fields + private_fields
-            self.begin_statement()
-            self.write("public static class ", name)
-            if handle_val_is_this:
-                self.write(" extends ", self.visit(t.value_type, ""))
-            self.write(" implements java.io.Serializable ")
-            with self.block():
-                for (f, ft) in public_fields + private_fields:
-                    self.begin_statement()
-                    self.write("private {field_decl};".format(field_decl=self.visit(ft, f)))
-                    self.end_statement()
-                for (f, ft) in public_fields:
-                    self.begin_statement()
-                    self.write("public {type} get{Field}() {{ return {field}; }}".format(
-                        type=self.visit(ft, ""),
-                        Field=common.capitalize(f),
-                        field=f))
-                    self.end_statement()
-                if handle_val_is_this:
-                    self.begin_statement()
-                    self.write("public {type} getVal() {{ return this; }}".format(
-                        type=self.visit(t.value_type, "")))
-                    self.end_statement()
-
-                def flatten(field_types):
-                    args = []
-                    exps = []
-                    for ft in field_types:
-                        if isinstance(ft, TRecord):
-                            aa, ee = flatten([t for (f, t) in ft.fields])
-                            args.extend(aa)
-                            exps.append(EMakeRecord(tuple((f, e) for ((f, _), e) in zip(ft.fields, ee))).with_type(ft))
-                        elif isinstance(ft, TTuple):
-                            aa, ee = flatten(ft.ts)
-                            args.extend(aa)
-                            exps.append(ETuple(tuple(ee)).with_type(ft))
-                        else:
-                            v = self.fv(ft, "v")
-                            args.append((v.id, ft))
-                            exps.append(v)
-                    return args, exps
-
-                if isinstance(t, THandle):
-                    args, exps = flatten([ft for (f, ft) in (t.value_type.fields if handle_val_is_this else public_fields)])
-                else:
-                    args = public_fields
-                    exps = [EVar(f) for (f, ft) in args]
-                self.begin_statement()
-                self.write("public {ctor}({args}) ".format(ctor=name, args=", ".join(self.visit(ft, f) for (f, ft) in args)))
-                with self.block():
-                    if handle_val_is_this:
-                        es = [self.visit(e) for e in exps]
-                        self.begin_statement()
-                        self.write("super({args});\n".format(
-                            args=", ".join(es)))
-                    for ((f, ft), e) in zip(public_fields, exps):
-                        e = self.visit(e)
-                        self.begin_statement()
-                        self.write("this.{f} = {e};\n".format(f=f, e=e))
-                self.end_statement()
-
-                if value_equality:
-                    self.begin_statement()
-                    self.write("@Override")
-                    self.end_statement()
-                    self.begin_statement()
-                    self.write("public int hashCode() ")
-                    with self.block():
-                        (compute, hc) = self.compute_hash(public_fields + private_fields)
-                        self.write(compute)
-                        self.begin_statement()
-                        self.write("return ", hc, ";")
-                        self.end_statement()
-                    self.end_statement()
-
-                    self.begin_statement()
-                    self.write("@Override")
-                    self.end_statement()
-                    self.begin_statement()
-                    self.write("public boolean equals(Object other) ")
-                    with self.block():
-                        self.write(self.get_indent(), "if (other == null) return false;\n")
-                        self.write(self.get_indent(), "if (other == this) return true;\n")
-                        self.write(self.get_indent(), "if (!(other instanceof {name})) return false;\n".format(name=name))
-                        self.write(self.get_indent(), "{name} o = ({name})other;\n".format(name=name))
-                        eq = self.visit(EAll([EEq(
-                            EEscape("this.{}".format(f), (), ()).with_type(ft),
-                            EEscape("o.{}".format(f),    (), ()).with_type(ft))
-                            for (f, ft) in all_fields]))
-                        self.write(self.get_indent(), "return ", eq, ";\n")
-                    self.end_statement()
-            self.end_statement()
-        elif isinstance(t, TTuple):
-            return self.define_type(toplevel_name, TRecord(tuple(("_{}".format(i), t.ts[i]) for i in range(len(t.ts)))), name, sharing);
-        else:
-            return ""
-
-    def visit_TBool(self, t, name):
-        return "{} {}".format("Boolean" if self.boxed else "boolean", name)
-
-    def visit_TInt(self, t, name):
-        return "{} {}".format("Integer" if self.boxed else "int", name)
-
-    def visit_TLong(self, t, name):
-        return "{} {}".format("Long" if self.boxed else "int", name)
-
-    def visit_TFloat(self, t, name):
-        return "{} {}".format("Float" if self.boxed else "float", name)
-
-    def is_primitive(self, t):
-        return (
-            t in {INT, LONG, BOOL, FLOAT} or
-            (isinstance(t, TNative) and t.name.strip() in JAVA_PRIMITIVE_TYPES))
-
-    def trovename(self, t):
-        t = common.capitalize(self.visit(t, name="").strip()) if self.is_primitive(t) else "Object"
-        if t == "Boolean":
-            # Ack! Trove does not support boolean collections. In general, there
-            # are more efficient implementations when you only have a finite set
-            # of values...
-            # See:
-            #   https://sourceforge.net/p/trove4j/discussion/121845/thread/1bd4dce9/
-            #   https://sourceforge.net/p/trove4j/discussion/121845/thread/ba39ca71/
-            return "Object"
-        return t
-
-    def troveargs(self, t):
-        name = self.trovename(t)
-        if name == "Object":
-            with self.boxed_mode():
-                return self.visit(t, name="")
-        return None
-
-    def visit_THandle(self, t, name):
-        return "{} {}".format(self.typename(t), name)
-
-    def visit_TString(self, t, name):
-        return "String {}".format(name)
-
-    def visit_TNativeList(self, t, name):
-        if self.boxed or not self.is_primitive(t.t):
-            return "java.util.ArrayList<{}> {}".format(self.visit(t.t, ""), name)
-        else:
-            return "gnu.trove.list.array.T{}ArrayList {}".format(
-                self.trovename(t.t),
-                name)
-
-    def visit_TNativeSet(self, t, name):
-        if self.boxed or not self.is_primitive(t.t):
-            return "java.util.HashSet< {} > {}".format(self.visit(t.t, ""), name)
-        else:
-            return "gnu.trove.set.hash.T{}HashSet {}".format(
-                self.trovename(t.t),
-                name)
-
-    def visit_TBag(self, t, name):
-        if hasattr(t, "rep_type"):
-            return self.visit(t.rep_type(), name)
-        return self.visit_TNativeList(t, name)
-
-    def visit_SCall(self, call):
-        target = self.visit(call.target)
-        args = [self.visit(a) for a in call.args]
-        if type(call.target.type) in (TBag, TSet):
-            self.begin_statement()
-            if call.func == "add":
-                self.write(target, ".add(", args[0], ");")
-            elif call.func == "remove":
-                self.write(target, ".remove(", args[0], ");")
-            else:
-                raise NotImplementedError(call.func)
-            self.end_statement()
-        return super().visit_SCall(call)
-
-    def visit_EGetField(self, e):
-        ee = self.visit(e.e)
-        if isinstance(e.e.type, THandle):
-            return "({}).getVal()".format(ee, e.f)
-        return "({}).{}".format(ee, e.f)
-
-    def find_one_native(self, iterable):
-        it = fresh_name("iterator")
-        setup, e = self.visit(iterable)
-        return (
-            "{setup}{indent}{decl} = {e}.iterator();\n".format(
-                setup=setup,
-                indent=indent,
-                decl=self.visit(TNative("java.util.Iterator<>"), it),
-                e=e),
-            "({it}.hasNext() ? {it}.next() : null)".format(it=it))
-
-    def visit_TVector(self, t, name):
-        return "{}[] {}".format(self.visit(t.t, ""), name)
-
-    def use_trove(self, t):
-        if isinstance(t, TMap):
-            return not (self.boxed or (not self.is_primitive(t.k) and not self.is_primitive(t.v)))
-        return False
-
-    def visit_TArray(self, t, name):
-        if t.t == BOOL:
-            return "long[] {}".format(name)
-        return "{}[] {}".format(self.visit(t.t, name=""), name)
-
-    def visit_TNativeMap(self, t, name):
-        if t.k == INT:
-            return self.visit(TArray(t.v), name)
-        if self.use_trove(t):
-            args = []
-            for x in (t.k, t.v):
-                x = self.troveargs(x)
-                if x is not None:
-                    args.append(x)
-            return "gnu.trove.map.hash.T{k}{v}HashMap{targs} {name}".format(
-                k=self.trovename(t.k),
-                v=self.trovename(t.v),
-                targs="<{}>".format(", ".join(args)) if args else "",
-                name=name)
-        else:
-            return "java.util.HashMap<{}, {}> {}".format(
-                self.visit(t.k, ""),
-                self.visit(t.v, ""),
-                name)
-
-    def visit_TRef(self, t, name):
-        return self.visit(t.t, name)
-
-    def for_each_native(self, x, iterable, body):
-        if not self.boxed and self.troveargs(x.type) is None:
-            setup, iterable_src = self.visit(iterable)
-            itname = fresh_name("iterator")
-            return "{setup}{indent}gnu.trove.iterator.T{T}Iterator {it} = {iterable}.iterator();\n{indent}while ({it}.hasNext()) {{\n{indent2}{decl} = {it}.next();\n{body}{indent}}}\n".format(
-                setup=setup,
-                iterable=iterable_src,
-                it=itname,
-                T=self.trovename(x.type),
-                decl=self.visit(x.type, name=x.id),
-                body=self.visit(body, indent+INDENT),
-                indent=indent,
-                indent2=indent+INDENT)
-        return super().for_each_native(x, iterable, body)
-
-    def visit_SMapPut(self, update):
-        if update.map.type.k == INT:
-            self.array_resize_for_index(update.map.type.v, update.map, update.key)
-        map = self.visit(update.map)
-        key = self.visit(update.key)
-        if update.map.type.k == INT:
-            self.visit(self.array_put(update.map.type.v, EEscape(map, [], []).with_type(update.map.type), EEscape(key, [], []).with_type(update.key.type), update.value))
-        else:
-            val = self.fv(update.value.type)
-            self.declare(val, update.value)
-            self.begin_statement()
-            self.write(map, ".put(", key, ", ", val.id, ");")
-            self.end_statement()
-
-    def visit_SMapUpdate(self, update):
-        if isinstance(update.change, SNoOp):
-            return ""
-        if update.map.type.k == INT:
-            self.array_resize_for_index(update.map.type.v, update.map, update.key)
-        # TODO: liveness analysis to avoid this map lookup in some cases
-        self.declare(update.val_var, EMapGet(update.map, update.key).with_type(update.map.type.v))
-        map = self.visit(update.map) # TODO: deduplicate
-        key = self.visit(update.key) # TODO: deduplicate
-        self.visit(update.change)
-        self.begin_statement()
-        if update.map.type.k == INT:
-            do_put = self.visit(self.array_put(update.map.type.v, EEscape(map, [], []).with_type(update.map.type), EEscape(key, [], []).with_type(update.key.type), update.val_var))
-        else:
-            self.write("{map}.put({key}, {val});\n".format(map=map, key=key, val=update.val_var.id))
-        self.end_statement()
-
-    def visit_SArrayAlloc(self, s):
-        lval = self.visit(s.a)
-        cap = self.visit(s.capacity)
-        elem_type = s.a.type.t
-        tname = self.strip_generics(self.visit(elem_type, name=""))
-        self.write_stmt(lval, " = new ", tname, "[", cap, "];")
-
-    def visit_SArrayReAlloc(self, s):
-        return self.array_resize_for_index(s.a.type.t, s.a, s.new_capacity)
-
-    def array_resize_for_index(self, elem_type, a, i):
-        new_a = fresh_name(hint="new_array")
-        if elem_type == BOOL:
-            t = "long"
-        else:
-            t = self.strip_generics(self.visit(elem_type, name=""))
-        len = EEscape("{a}.length", ["a"], [a]).with_type(INT)
-        double_size = SEscape(
-            "{{indent}}{t}[] {new_a} = new {t}[{{len}} << 1];\n{{indent}}System.arraycopy({{a}}, 0, {new_a}, 0, {{len}});\n{{indent}}{{a}} = {new_a};\n".format(t=t, new_a=new_a),
-            ["a", "len"], [a, len])
-        self.visit(SWhile(
-            ENot(self.array_in_bounds(elem_type, a, i)),
-            double_size))
-
-    def array_put(self, elem_type, a, i, val):
-        if elem_type == BOOL:
-            return SEscape("{indent}if ({val}) {{ {a}[{i} >> 6] |= (1L << {i}); }} else {{ {a}[{i} >> 6] &= ~(1L << {i}); }};\n",
-                ["a", "i", "val"],
-                [a, i, val])
-        return SEscape("{indent}{lval} = {val};\n", ["lval", "val"], [self.array_get(elem_type, a, i), val])
-
-    def array_get(self, elem_type, a, i):
-        if elem_type == BOOL:
-            return EEscape("(({a}[{i} >> 6] & (1L << {i})) != 0)", ["a", "i"], [a, i]).with_type(BOOL)
-        return EEscape("{a}[{i}]", ["a", "i"], [a, i]).with_type(elem_type)
-
-    def array_in_bounds(self, elem_type, a, i):
-        if elem_type == BOOL:
-            len = EBinOp(EEscape("{a}.length", ["a"], [a]), "<<", ENum(6).with_type(INT)).with_type(INT)
-        else:
-            len = EEscape("{a}.length", ["a"], [a]).with_type(INT)
-        return EAll([
-            EBinOp(i, ">=", ZERO).with_type(BOOL),
-            EBinOp(i, "<", len).with_type(BOOL)])
-
-    def native_map_get(self, e, default_value):
-        if e.key.type == INT:
-            return self.visit(ECond(
-                self.array_in_bounds(e.map.type.v, e.map, e.key),
-                self.array_get(e.map.type.v, e.map, e.key),
-                evaluation.construct_value(e.map.type.v)).with_type(e.map.type.v))
-        if self.use_trove(e.map.type):
-            if self.trovename(e.map.type.v) == "Object" and not isinstance(evaluation.construct_value(e.map.type.v), ENull):
-                # Le sigh...
-                emap = self.visit(e.map)
-                ekey = self.visit(e.key)
-                v = self.fv(e.map.type.v, hint="v")
-                with self.boxed_mode():
-                    decl = self.visit(SDecl(v.id, EEscape("{emap}.get({ekey})".format(emap=emap, ekey=ekey), [], []).with_type(e.type)))
-                s, e = self.visit(ECond(EEq(v, ENull().with_type(v.type)), evaluation.construct_value(e.map.type.v), v).with_type(e.type))
-                return (smap + skey + decl + s, e)
-            else:
-                # For Trove, defaults are set at construction time
-                emap = self.visit(e.map)
-                ekey = self.visit(e.key)
-                return "{emap}.get({ekey})".format(emap=emap, ekey=ekey)
-        else:
-            emap = self.visit(e.map)
-            ekey = self.visit(e.key)
-            edefault = self.visit(evaluation.construct_value(e.type))
-            return "{emap}.getOrDefault({ekey}, {edefault})".format(emap=emap, ekey=ekey, edefault=edefault)
-
-    def visit(self, x, *args, **kwargs):
-        res = super().visit(x, *args, **kwargs)
-        if isinstance(res, tuple):
-            raise Exception(type(x))
-        return res
