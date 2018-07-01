@@ -19,8 +19,31 @@ from .misc import *
 
 JAVA_PRIMITIVE_TYPES = {"boolean", "byte", "char", "short", "int", "long", "float", "double"}
 
-def bracketed(s: str):
-    return "{\n" + "\n".join(["\t" + line for line in s.split("\n")]) + "\n}"
+def combine_code(*args):
+    pieces = [piece for piece in args if piece is not None]
+    if len(pieces) == 0:
+        return None
+    return "\n".join(pieces)
+
+def bracketed(*args):
+    return "{\n" + "\n".join(["\t" + line for line in combine_code(*args).split("\n")]) + "\n}"
+
+class RenderedExpr:
+    def __init__(self, *, inline, setup = None):
+        self.setup = setup
+        self.inline = inline
+    def use(self, func):
+        subrender = func(self.inline)
+        return RenderedExpr(
+            setup = combine_code(self.setup, subrender.setup),
+            inline = subrender.inline,
+        )
+
+def rendered_expr_list(input):
+    return RenderedExpr(
+        setup = combine_code(*[item.setup for item in input]),
+        inline = [item.inline for item in input]
+    )
 
 class JavaPrinter:
     def __init__(self, out):
@@ -33,6 +56,8 @@ class JavaPrinter:
         return "{}{}".format(name, self.unique_counter)
 
     def render_complete(self, *, spec: Spec, state_map, share_info, abstract_state):
+        debug(spec)
+        debug(share_info)
         if len(share_info) != 0:
             raise NotImplemented
         
@@ -73,18 +98,16 @@ class JavaPrinter:
             # docstring
             ''
         )
-        if len(spec.types) > 0:
-            raise NotImplemented
         if len(spec.extern_funcs) > 0:
-            raise NotImplemented
+            raise NotImplementedError
         if len(spec.assumptions) > 0:
-            raise NotImplemented
+            raise NotImplementedError
         if len(spec.header) > 0:
-            raise NotImplemented
+            raise NotImplementedError
         if len(spec.footer) > 0:
-            raise NotImplemented
+            raise NotImplementedError
         if len(spec.docstring) > 0:
-            raise NotImplemented
+            raise NotImplementedError
         # debug(state_map)
         example_state_map = OrderedDict([
             (
@@ -134,7 +157,21 @@ class JavaPrinter:
     
     def render_spec(self, spec: Spec):
         out = ""
-
+        out += "// types\n"
+        for (name, custom) in spec.types:
+            if type(custom.value_type) is not TRecord:
+                raise NotImplementedError
+            record = custom.value_type
+            out += "class {} {}\n".format(name, "{")
+            for (fieldname, fieldtype) in record.fields:
+                out += "\tpublic {} {};\n".format(self.render_type(fieldtype), fieldname)
+            out += "\t{}(".format(name)
+            out += ", ".join([self.render_type(fieldtype) + " " + fieldname for (fieldname, fieldtype) in record.fields])
+            out += ") {\n"
+            for (fieldname, fieldtype) in record.fields:
+                out += "\t\tthis.{f} = {f};\n".format(f = fieldname)
+            out += "\t}\n"
+            out += "}\n"
         out += "// state vars\n"
         for statevar in spec.statevars:
             out += self.render_statevar(statevar) + "\n"
@@ -163,29 +200,18 @@ class JavaPrinter:
             body = self.render_expr_return_block(query.ret),
             visibility = visibility,
         )
-    
-    def combine_code(self, *args):
-        pieces = [piece for piece in args if piece is not None]
-        if len(pieces) == 0:
-            return None
-        return "\n".join(pieces)
 
-    def render_expr(self, expr: Exp, mapping) -> Tuple[Optional[str], str]:
+    def render_expr(self, expr: Exp, mapping) -> RenderedExpr:
         # returns a pair of (setup_code, inline_string).
         # The setup code is several statements, and the inline_string is one Java expression.
         if type(expr) is EVar:
             if expr.id in mapping:
-                return None, mapping[expr.id]
-            return None, "{}".format(expr.id)
+                return RenderedExpr(inline = mapping[expr.id])
+            return RenderedExpr(inline = "{}".format(expr.id))
         elif type(expr) is ECall:
-            pieces = [self.render_expr(arg, mapping) for arg in expr.args]
-            setups = [s[0] for s in pieces if s[0] is not None]
-            if len(setups) == 0:
-                setups = None
-            else:
-                setups = "\n".join(setups)
-            inlines = [s[1] for s in pieces]
-            return setups, "{}({})".format(expr.func, ", ".join(inlines))
+            return rendered_expr_list([self.render_expr(arg, mapping) for arg in expr.args]).use(lambda args:
+                RenderedExpr(inline = "{}({})".format(expr.func, ", ".join(args)))
+            )
         elif type(expr) is EBinOp:
             if expr.op == "or":
                 if type(expr.e1) is EBool:
@@ -202,71 +228,88 @@ class JavaPrinter:
                     else:
                         # identity
                         return self.render_expr(expr.e1, mapping)
-            (left_setup, left_inline) = self.render_expr(expr.e1, mapping)
-            (right_setup, right_inline) = self.render_expr(expr.e2, mapping)
-            if expr.op == "-" and type(expr.e1.type) is TBag:
-                self.needs_aux["bagDifference"] = True
-                return self.combine_code(left_setup, right_setup), "bagDifference({}, {})".format(left_inline, right_inline)
-            op = expr.op
-            replace = {
-                "or": "||",
-                "and": "&&",
-            }
-            if op in replace:
-                op = replace[op]
-            return self.combine_code(left_setup, right_setup), "({} {} {})".format(left_inline, op, right_inline)
+            # TODO: deal specially with "-" when they're TBag. (see needs_aux)
+            def correct_op():
+                if expr.op == "or":
+                    return "||"
+                if expr.op == "and":
+                    return "&&"
+                return expr.op
+            return self.render_expr(expr.e1, mapping).use(lambda left:
+                self.render_expr(expr.e2, mapping).use(lambda right:
+                    RenderedExpr(inline = "({} {} {})".format(left, correct_op(), right))
+                )
+            )
         elif type(expr) is EUnaryOp:
-            arg_setup, arg_inline = self.render_expr(expr.e, mapping)
-            if expr.op == "distinct" and type(expr.e.type) is TBag:
-                self.needs_aux["bagDistinct"] = True
-                return arg_setup, "bagDistinct({})".format(arg_inline)
+            template = "({op} {arg})"
+            if expr.op == "len":
+                template = "{arg}.size()"
             if expr.op == "not":
                 if type(expr.e) is EBinOp and expr.e.op == "==":
                     return self.render_expr(EBinOp(expr.e.e1, "!=", expr.e.e2).with_type(expr.type), mapping)
-                return arg_setup, "(!" + arg_inline + ")"
-            if expr.op == "len":
-                return arg_setup, "{}.size()".format(arg_inline)
-            return arg_setup, "(" + expr.op + " " + arg_inline + ")"
+                template = "(!{arg})"
+            return self.render_expr(expr.e, mapping).use(lambda val:
+                RenderedExpr(inline = template.format(arg = val, op = expr.op))
+            )
+        elif type(expr) is EGetField:
+            return self.render_expr(expr.e, mapping).use(
+                lambda obj: RenderedExpr(inline = obj + "." + expr.f)
+            )
+        elif type(expr) is EMakeRecord:
+            return rendered_expr_list([self.render_expr(field, mapping) for field in expr.fields]).use(lambda fields:
+                RenderedExpr(inline = "new {}({})".format(expr.type.state_var, ", ".join(fields)))
+            )
         elif type(expr) is EBool:
             if expr.val:
-                return None, "true"
+                return RenderedExpr(inline = "true")
             else:
-                return None, "false"
+                return RenderedExpr(inline = "false")
         elif type(expr) is ECond:
-            cond_setup, cond_inline = self.render_expr(expr.cond, mapping)
-            then_setup, then_inline = self.render_expr(expr.then_branch, mapping)
-            else_setup, else_inline = self.render_expr(expr.else_branch, mapping)
             fresh = self.fresh_temporary()
-            return self.combine_code(cond_setup, "{temp_type} {temp_name};\nif ({cond_inline}) {then_branch} else {else_branch}".format(
-                temp_name = fresh,
-                temp_type = self.render_type(expr.type),
-                cond_inline = cond_inline,
-                then_branch = bracketed(self.combine_code(then_setup, "{} = {};".format(fresh, then_inline))),
-                else_branch = bracketed(self.combine_code(else_setup, "{} = {};".format(fresh, else_inline))),
-            )), fresh
+            cond = self.render_expr(expr.cond, mapping)
+            then_branch = self.render_expr(expr.then_branch, mapping)
+            else_branch = self.render_expr(expr.else_branch, mapping)
+            # TODO: refactor this is we can 
+            return RenderedExpr(
+                setup = combine_code(cond.setup, "{temp_type} {temp_name};\nif ({cond_inline}) {then_branch} else {else_branch}".format(
+                    temp_name = fresh,
+                    temp_type = self.render_type(expr.type),
+                    cond_inline = cond.inline,
+                    then_branch = bracketed(combine_code(then_branch.setup, "{} = {};".format(fresh, then_branch.inline))),
+                    else_branch = bracketed(combine_code(else_branch.setup, "{} = {};".format(fresh, else_branch.inline))),
+                )),
+                inline = fresh
+            )
         elif type(expr) is EHasKey:
-            map_setup, map_inline = self.render_expr(expr.map, mapping)
-            key_setup, key_inline = self.render_expr(expr.key, mapping)
-            return self.combine_code(map_setup, key_setup), "{}.containsKey({})".format(map_inline, key_inline)
+            return self.render_expr(expr.map, mapping).use(lambda m:
+                self.render_expr(expr.key, mapping).use(lambda k:
+                    RenderedExpr(inline = "{}.containsKey({})".format(m, k))
+                )
+            )
         elif type(expr) is ELambda:
             raise RuntimeError("unexpected bare ELambda (should only occur in map/filter)")
         elif type(expr) is EMapGet:
-            map_setup, map_inline = self.render_expr(expr.map, mapping)
-            key_setup, key_inline = self.render_expr(expr.key, mapping)
-            return self.combine_code(map_setup, key_setup), "{}.get({})".format(map_inline, key_inline)
+            return self.render_expr(expr.map, mapping).use(lambda m:
+                self.render_expr(expr.key, mapping).use(lambda k:
+                    RenderedExpr(inline = "{}.get({})".format(map_inline, key_inline))
+                )
+            )
         elif type(expr) is ENum:
-            return None, "{}".format(expr.val)
+            return RenderedExpr(inline = "{}".format(expr.val))
         elif type(expr) is ESingleton:
             singleton = self.fresh_temporary("singleton")
-            item_setup, item_inline = self.render_expr(expr.e, mapping)
-            return self.combine_code(
-                item_setup,
-                "{type} {name} = new {type}();".format(type = self.render_type(expr.type), name = singleton),
-                "{name}.add({item});".format(name = singleton, item = item_inline),
-            ), singleton
+            return self.render_expr(expr.e, mapping).use(lambda item:
+                RenderedExpr(
+                    setup = combine_code(
+                        "{type} {name} = new {type}();".format(type = self.render_type(expr.type), name = singleton),
+                        "{name}.add({item});".format(name = singleton, item = item),
+                    ),
+                    inline = singleton,
+                )
+            ) 
         elif type(expr) is EFilter:
             # first, build the bag
-            bag_setup, bag_inline = self.render_expr(expr.e, mapping)
+            bag = self.render_expr(expr.e, mapping)
             if type(expr.p) is not ELambda:
                 raise RuntimeError("EFilter with non-lambda filter")
             result = self.fresh_temporary("filtered")
@@ -276,22 +319,45 @@ class JavaPrinter:
             for v in mapping:
                 new_mapping[v] = mapping[v]
             new_mapping[expr.p.arg.id] = item
-            lambda_setup, lambda_inline = self.render_expr(expr.p.body, new_mapping)
-            item_addition_code = self.combine_code(lambda_setup, "if ({cond}) {open_brace}\n\t{col}.add({item});\n{close_brace}".format(cond = lambda_inline, col = result, open_brace="{", close_brace="}", item = item))
+            lambda_body = self.render_expr(expr.p.body, new_mapping)
+            item_addition_code = combine_code(lambda_body.setup, "if ({cond}) {open_brace}\n\t{col}.add({item});\n{close_brace}".format(cond = lambda_body.inline, col = result, open_brace="{", close_brace="}", item = item))
             filtering_code = "{result_type} {result} = new {result_type}();\nfor ({item_type} {item} : {bag_inline}) {inside}".format(
                 result_type = self.render_type(expr.type),
-                bag_inline = bag_inline,
+                bag_inline = bag.inline,
                 item_type = self.render_type(expr.type.t),
                 result = result,
                 item = item,
                 inside = bracketed(item_addition_code),
             )
-            return self.combine_code(bag_setup, filtering_code), result
+            return RenderedExpr(setup = combine_code(bag.setup, filtering_code), inline = result)
+        elif type(expr) is EMap:
+            # first, build the bag
+            bag = self.render_expr(expr.e, mapping)
+            if type(expr.f) is not ELambda:
+                raise RuntimeError("EMap with non-lambda filter")
+            result = self.fresh_temporary("mapped")
+            item = self.fresh_temporary("item")
+
+            new_mapping = {}
+            for v in mapping:
+                new_mapping[v] = mapping[v]
+            new_mapping[expr.f.arg.id] = item
+            lambda_body = self.render_expr(expr.f.body, new_mapping)
+            item_addition_code = combine_code(lambda_body.setup, "{result}.add({item});".format(result = result, item = lambda_body.inline))
+            filtering_code = "{result_type} {result} = new {result_type}();\nfor ({item_type} {item} : {bag_inline}) {inside}".format(
+                result_type = self.render_type(expr.type),
+                bag_inline = bag.inline,
+                item_type = self.render_type(expr.type.t),
+                result = result,
+                item = item,
+                inside = bracketed(item_addition_code),
+            )
+            return RenderedExpr(setup = combine_code(bag.setup, filtering_code), inline = result)
         elif type(expr) is EMakeMap2:
             if type(expr.value) is not ELambda:
                 raise NotImplementedError
             make = self.fresh_temporary("make")
-            keys_setup, keys_inline = self.render_expr(expr.e, mapping)
+            keys = self.render_expr(expr.e, mapping)
             
             key = self.fresh_temporary("key")
             new_mapping = {}
@@ -299,76 +365,80 @@ class JavaPrinter:
                 new_mapping[v] = mapping[v]
             new_mapping[expr.value.arg.id] = key
 
-            val_setup, val_inline = self.render_expr(expr.value.body, new_mapping)
-            body = bracketed(self.combine_code(
-                val_setup,
-                "{}.set({}, {});".format(make, key, val_inline)
+            val = self.render_expr(expr.value.body, new_mapping)
+            body = bracketed(combine_code(
+                val.setup,
+                "{}.set({}, {});".format(make, key, val.inline)
             ))
-            return self.combine_code(
-                keys_setup,
-                "{map_type} {make} = new {map_type}();".format(
-                    map_type = self.render_type(expr.type),
-                    make = make,
+            return RenderedExpr(
+                setup = combine_code(
+                    keys.setup,
+                    "{map_type} {make} = new {map_type}();".format(
+                        map_type = self.render_type(expr.type),
+                        make = make,
+                    ),
+                    "for ({key_type} {key_name} : {keys}) {body}".format(
+                        key_type = self.render_type(expr.value.arg.type),
+                        key_name = key,
+                        keys = keys.inline,
+                        body = body,
+                    ),
                 ),
-                "for ({key_type} {key_name} : {keys}) {body}".format(
-                    key_type = self.render_type(expr.value.arg.type),
-                    key_name = key,
-                    keys = keys_inline,
-                    body = body,
-                ),
-            ), make
+                inline = make,
+            )
         elif type(expr) is EEmptyList:
-            return None, "new {}()".format(self.render_type(expr.type))
-        else:
-            debug(expr)
-            raise NotImplementedError
+            return RenderedExpr(inline = "new {}()".format(self.render_type(expr.type)))
+        
+        debug(expr)
+        raise NotImplementedError
     def render_expr_return_block(self, expr: Exp):
-        (setup, inline) = self.render_expr(expr, {})
-        return bracketed(self.combine_code(setup, "return {};".format(inline)))
+        rendered = self.render_expr(expr, {})
+        return bracketed(combine_code(rendered.setup, "return {};".format(rendered.inline)))
 
     def render_stmt(self, stmt: Stm):
         if type(stmt) is SAssign:
             if type(stmt.lhs) is not EVar:
                 raise NotImplementedError
-            rhs_setup, rhs_inline = self.render_expr(stmt.rhs, {})
-            return self.combine_code(rhs_setup, "{} = {};".format(stmt.lhs.id, rhs_inline))
+            rhs = self.render_expr(stmt.rhs, {})
+            return combine_code(rhs.setup, "{} = {};".format(stmt.lhs.id, rhs.inline))
         elif type(stmt) is SCall:
             if type(stmt.target) is not EVar:
                 raise NotImplementedError
-            call_setup, call_inline = self.render_expr(ECall(stmt.func, stmt.args).with_type(stmt.target.type), {})
-            return self.combine_code(call_setup, "{} = {};".format(stmt.target.id, call_inline))
+            call = self.render_expr(ECall(stmt.func, stmt.args).with_type(stmt.target.type), {})
+            return combine_code(call.setup, "{} = {};".format(stmt.target.id, call.inline))
         elif type(stmt) is SDecl:
-            init_setup, init_inline = self.render_expr(stmt.val, {})
-            return self.combine_code(init_setup, "{} {} = {};".format(self.render_type(stmt.val.type), stmt.id, init_inline))
+            debug(stmt.val)
+            init = self.render_expr(stmt.val, {})
+            return combine_code(init.setup, "{} {} = {};".format(self.render_type(stmt.val.type), stmt.id, init.inline))
         elif type(stmt) is SForEach:
-            iter_setup, iter_inline = self.render_expr(stmt.iter, {})
-            return self.combine_code(
-                iter_setup,
-                "for ({} {} : {}) {}".format(self.render_type(stmt.id.type), stmt.id.id, iter_inline, bracketed(self.render_stmt(stmt.body))),
+            iter_block = self.render_expr(stmt.iter, {})
+            return combine_code(
+                iter_block.setup,
+                "for ({} {} : {}) {}".format(self.render_type(stmt.id.type), stmt.id.id, iter_block.inline, bracketed(self.render_stmt(stmt.body))),
             )
         elif type(stmt) is SMapDel:
-            map_setup, map_inline = self.render_expr(stmt.map, {})
-            key_setup, key_inline = self.render_expr(stmt.key, {})
-            return self.combine_code(
-                map_setup,
-                key_setup,
-                "{}.remove({});".format(map_inline, key_inline),
+            map_obj = self.render_expr(stmt.map, {})
+            key = self.render_expr(stmt.key, {})
+            return combine_code(
+                map_obj.setup,
+                key.setup,
+                "{}.remove({});".format(map_obj.inline, key.inline),
             )
         elif type(stmt) is SMapUpdate:
-            map_setup, map_inline = self.render_expr(stmt.map, {})
-            key_setup, key_inline = self.render_expr(stmt.key, {})
+            map_obj = self.render_expr(stmt.map, {})
+            key = self.render_expr(stmt.key, {})
             modify = self.render_stmt(stmt.change)
-            return self.combine_code(
-                map_setup,
-                key_setup,
-                "{} {} = {}.get({});".format(self.render_type(stmt.val_var.type), stmt.val_var.id, map_inline, key_inline),
+            return combine_code(
+                map_obj.setup,
+                key.setup,
+                "{} {} = {}.get({});".format(self.render_type(stmt.val_var.type), stmt.val_var.id, map_obj.inline, key.inline),
                 modify,
-                "{}.set({}, {});".format(map_inline, key_inline, stmt.val_var.id),
+                "{}.set({}, {});".format(map_obj.inline, key.inline, stmt.val_var.id),
             )
         elif type(stmt) is SNoOp:
             return "/* no-op */"
         elif type(stmt) is SSeq:
-            return self.combine_code(self.render_stmt(stmt.s1), self.render_stmt(stmt.s2))
+            return combine_code(self.render_stmt(stmt.s1), self.render_stmt(stmt.s2))
         else:
             raise NotImplementedError
 
@@ -411,9 +481,9 @@ class JavaPrinter:
         elif type(atype) is TNative:
             raise NotImplementedError
         elif type(atype) is THandle:
-            raise NotImplementedError
+            return atype.statevar # TODO: this is a terrible name
         elif type(atype) is TBag:
-            # not really precise, but only sane implementation
+            # TODO: make it a HashMap<{item}, Integer>.
             return "java.util.ArrayList<{item}>".format(item = self.render_type(atype.t))
         elif type(atype) is TSet:
             return "java.util.HashSet<{key}>".format(key = self.render_type(atype.t))
@@ -433,8 +503,3 @@ class JavaPrinter:
             raise NotImplementedError
         else:
             raise NotImplementedError
-
-
-
-
-

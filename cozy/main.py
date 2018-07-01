@@ -163,7 +163,7 @@ def run():
         java = args.java
         if java is not None:
             with common.open_maybe_stdout(java) as out:
-                codegen.JavaPrinter(out=out).render_complete(spec=spec, state_map=state_map, share_info=share_info, abstract_state=ast.spec.statevars)
+                codegen.JavaPrinter(out=out).render_complete(spec=impl, state_map=state_map, share_info=share_info, abstract_state=ast.spec.statevars)
 
         cxx = getattr(args, "c++")
         if cxx is not None:
