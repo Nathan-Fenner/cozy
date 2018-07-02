@@ -9,7 +9,7 @@ import unittest
 
 from cozy.target_syntax import *
 from cozy.syntax_tools import pprint, mk_lambda, fresh_var
-from cozy.codegen import CxxPrinter, JavaPrinter
+from cozy.codegen import CxxPrinter
 from cozy.typecheck import retypecheck
 
 class TestCodegen(unittest.TestCase):
@@ -29,8 +29,8 @@ class TestCodegen(unittest.TestCase):
             codegen.visit(impl, state_map, share_info)
             code = f.getvalue()
 
-        ext = "java" if isinstance(codegen, JavaPrinter) else "cpp"
-        compile = ["javac"] if isinstance(codegen, JavaPrinter) else ["c++", "-std=c++11", "-w", "-c", "-o", "/dev/null"]
+        ext = "cpp"
+        compile = ["c++", "-std=c++11", "-w", "-c", "-o", "/dev/null"]
         dir = tempfile.mkdtemp()
         print("Writing impls to {}".format(dir))
         filename = os.path.join(dir, "{}.{}".format(impl.name, ext))
@@ -50,54 +50,62 @@ class TestCodegen(unittest.TestCase):
 
     def test_construct_concrete_list(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
-                stm = codgen.construct_concrete(TList(INT), bag, EVar("out").with_type(TList(INT)))
-                codgen.visit(stm)
+            codgen = CxxPrinter(out=f)
+            
+            bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
+            stm = codgen.construct_concrete(TList(INT), bag, EVar("out").with_type(TList(INT)))
+            codgen.visit(stm)
 
     def test_construct_concrete_map(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
-                map = EMakeMap2(bag, mk_lambda(INT, lambda k: k)).with_type(TMap(INT, INT))
-                stm = codgen.construct_concrete(TMap(INT, INT), map, EVar("out").with_type(TMap(INT, INT)))
-                codgen.visit(stm)
+            codgen = CxxPrinter(out=f)
+
+            bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
+            map = EMakeMap2(bag, mk_lambda(INT, lambda k: k)).with_type(TMap(INT, INT))
+            stm = codgen.construct_concrete(TMap(INT, INT), map, EVar("out").with_type(TMap(INT, INT)))
+            codgen.visit(stm)
 
     def test_distinct_foreach(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
-                x = fresh_var(INT)
-                v = fresh_var(INT)
-                stm = SForEach(x, EUnaryOp(UOp.Distinct, bag).with_type(TSet(INT)), SAssign(v, x))
-                codgen.visit(stm)
+            codgen = CxxPrinter(out=f)
+
+            bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
+            x = fresh_var(INT)
+            v = fresh_var(INT)
+            stm = SForEach(x, EUnaryOp(UOp.Distinct, bag).with_type(TSet(INT)), SAssign(v, x))
+            codgen.visit(stm)
 
     def test_distinct(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
-                print(codgen.visit(EUnaryOp(UOp.Distinct, bag).with_type(TSet(INT))))
+            codgen = CxxPrinter(out=f)
+
+            bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
+            print(codgen.visit(EUnaryOp(UOp.Distinct, bag).with_type(TSet(INT))))
 
     def test_len(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
-                print(codgen.visit(EUnaryOp(UOp.Length, bag).with_type(TSet(INT))))
+            codgen = CxxPrinter(out=f)
+
+            bag = EFilter(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(INT))
+            print(codgen.visit(EUnaryOp(UOp.Length, bag).with_type(TSet(INT))))
 
     def test_all(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EMap(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(BOOL))
-                print(codgen.visit(EUnaryOp(UOp.All, bag).with_type(TSet(INT))))
+            codgen = CxxPrinter(out=f)
+
+            bag = EMap(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO))).with_type(TBag(BOOL))
+            print(codgen.visit(EUnaryOp(UOp.All, bag).with_type(TSet(INT))))
 
     def test_any(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EMap(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO).with_type(BOOL))).with_type(TBag(BOOL))
-                print(codgen.visit(EUnaryOp(UOp.Any, bag).with_type(TSet(INT))))
+            codgen = CxxPrinter(out=f)
+
+            bag = EMap(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO).with_type(BOOL))).with_type(TBag(BOOL))
+            print(codgen.visit(EUnaryOp(UOp.Any, bag).with_type(TSet(INT))))
 
     def test_argmin(self):
         with io.StringIO() as f:
-            for codgen in (CxxPrinter(out=f), JavaPrinter(out=f)):
-                bag = EMap(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO).with_type(BOOL))).with_type(TBag(BOOL))
-                print(codgen.visit(EArgMin(bag, mk_lambda(INT, lambda x: EUnaryOp("-", x).with_type(x.type))).with_type(INT)))
+            codgen = CxxPrinter(out=f)
+
+            bag = EMap(EVar("v").with_type(TBag(INT)), mk_lambda(INT, lambda x: EBinOp(x, ">", ZERO).with_type(BOOL))).with_type(TBag(BOOL))
+            print(codgen.visit(EArgMin(bag, mk_lambda(INT, lambda x: EUnaryOp("-", x).with_type(x.type))).with_type(INT)))

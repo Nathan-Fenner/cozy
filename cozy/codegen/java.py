@@ -1,15 +1,6 @@
-from contextlib import contextmanager
 from collections import OrderedDict
-import itertools
-import json
 from typing import *
 
-import sys
-
-def debug(msg):
-    sys.stderr.write(repr(msg) + '\n')
-
-from cozy import common, evaluation
 from cozy.target_syntax import *
 from cozy.structures.arrays import TArray
 from cozy.structures import extension_handler
@@ -17,7 +8,101 @@ from cozy.syntax import *
 
 from .misc import *
 
-JAVA_PRIMITIVE_TYPES = {"boolean", "byte", "char", "short", "int", "long", "float", "double"}
+java_builtins = """
+public static final class Bag<T> implements java.lang.Iterable<T> {
+    private final java.util.HashMap<T, Integer> hash;
+    Bag() {
+        hash = new java.util.HashMap<T, Integer>();
+    }
+    pubic final void add(T item) {
+        if (hash.containsKey(item)) {
+            hash.replace(item, hash.get(item) + 1);
+        } else {
+            hash.put(item, 1);
+        }
+    }
+    public final void remove(T item) {
+        if (hash.containsKey(item)) {
+            if (hash.get(item) == 1) {
+                hash.remove(item);
+            } else {
+                hash.put(item, hash.get(item)-1);
+            }
+        }
+    }
+    public final bool contains(T item) {
+        return hash.containsKey(item);
+    }
+    public final Bag<T> union(Bag<T> other) {
+        Bag<T> out = new Bag<T>();
+        for (java.util.HashMap.Entry<T, Integer> p : hash.entrySet()) {
+            out.hash.put(p.getKey(), p.getValue());
+        }
+        for (java.util.HashMap.Entry<T, Integer> p : other.hash.entrySet()) {
+            if (out.has.containsKey(p.getKey())) {
+                out.hash.put(p.getKey(), out.hash.get(p.getKey()) + p.getValue());
+            } else {
+                out.hash.put(p.getKey(), p.getValue());
+            }
+        }
+        return out;
+    }
+    public final java.util.HashSet<T> distinct() {
+        java.util.HashSet<T> out = new java.util.HashSet<T>();
+        for (java.util.HashMap.Entry<T, Integer> p : hash.entrySet()) {
+            out.hash.add(p.getKey());
+        }
+        return out;
+    }
+    public final Bag<T> difference(Bag<T> other) {
+        Bag<T> out = new Bag<T>();
+        for (java.util.HashMap.Entry<T, Integer> p : hash.entrySet()) {
+            if (other.contains(p.getKey())) {
+                if (other.get(p.getKey()) < p.getValue()) {
+                    out.hash.put(p.getKey(), p.getValue() - other.get(p.getKey()));
+                }
+            } else {
+                out.hash.put(p.getKey(), p.getValue());
+            }
+        }
+        return out;
+    }
+    static final class BagIterator<T> implements java.util.Iterator<T> {
+        private java.util.HashMap.Entry<T, Integer> current;
+        int count;
+        private java.util.Iterator<java.util.HashMap.Entry<T, Integer>> iter;
+        BagIterator(Bag<T> bag) {
+            this.current = null;
+            this.count = 0;
+            this.iter = bag.hash.entrySet().iterator();
+        }
+        public boolean hasNext() {
+            return (this.current != null && this.count < this.current.getValue()) || this.iter.hasNext();
+        }
+
+        public T next() {
+            if (this.current == null || this.count >= this.current.getValue()) {
+                this.current = this.iter.next();
+                this.count = 0;
+            }
+            this.count++;
+            return this.current.getKey();
+        }
+    }
+    public final java.util.Iterator<T> iterator() {
+        return new BagIterator<T>(this);
+    }
+    final boolean equals(Object other) {
+        if (other instanceof Bag<T>) {
+            return hash.equals(((Bag<T>)other).hash);
+        }
+        return false;
+    }
+    final int hashCode() {
+        return hash.hashCode();
+    }
+}
+"""
 
 def combine_code(*args):
     pieces = [piece for piece in args if piece is not None]
@@ -26,7 +111,7 @@ def combine_code(*args):
     return "\n".join(pieces)
 
 def bracketed(*args):
-    return "{\n" + "\n".join(["\t" + line for line in combine_code(*args).split("\n")]) + "\n}"
+    return "{\n" + "\n".join(["    " + line for line in combine_code(*args).split("\n")]) + "\n}"
 
 class RenderedExpr:
     def __init__(self, *, inline, setup = None):
@@ -55,49 +140,7 @@ class JavaPrinter:
         self.unique_counter += 1
         return "{}{}".format(name, self.unique_counter)
 
-    def render_complete(self, *, spec: Spec, state_map, share_info, abstract_state):
-        debug(spec)
-        debug(share_info)
-        if len(share_info) != 0:
-            raise NotImplemented
-        
-        # debug(impl)
-        example_spec = Spec(
-            # name
-            'Basic',
-            # types
-            [],
-            # extern_funcs
-            [],
-            # statevars 
-            [
-                ('_var27', TBag(TInt())),
-                ('_var2428', TMap(TInt(), TBool())),
-                ('_var14938', TMap(TInt(), TInt())),
-            ],
-            # assumptions
-            [],
-            # methods 
-            [
-                Query('elems', 'public', [], (), EVar('_var27').with_type(TBag(TInt())), ''),
-                Query('_query42', 'internal', [('n', TInt())], (), ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), '[add] additions to _var27'),
-                Query('_query43', 'internal', [('n', TInt())], (), EEmptyList().with_type(TBag(TInt())), '[add] deletions from _var27'),
-                Query('_query92', 'internal', [('n', TInt())], (), ECond(EHasKey(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('n').with_type(TInt())).with_type(TBool()), ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), EEmptyList().with_type(TBag(TInt()))).with_type(TBag(TInt())), '[remove] deletions from _var27'),
-                Query('_query2702', 'internal', [('n', TInt())], (), EFilter(ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), ELambda(EVar('_var2601').with_type(TInt()), EUnaryOp('not', EHasKey(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var2601').with_type(TInt())).with_type(TBool())).with_type(TBool()))).with_type(TBag(TInt())), '[add] new or modified keys from _var2428'),
-                Query('_query3619', 'internal', [('n', TInt())], (), ECond(EBinOp(EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('n').with_type(TInt())).with_type(TInt()), '==', ENum(1).with_type(TInt())).with_type(TBool()), ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt())), EEmptyList().with_type(TBag(TInt()))).with_type(TBag(TInt())), '[remove] keys removed from _var2428'),
-                Query('_query15748', 'internal', [('n', TInt()), ('_var15437', TInt()), ('_var15438', TInt())], (), EBinOp(EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt())).with_type(TInt()), '+', ENum(1).with_type(TInt())).with_type(TInt()), '[add] new value for _var15438'),
-                Query('_query19227', 'internal', [('n', TInt()), ('_var18920', TInt()), ('_var18921', TInt())], (), EBinOp(EVar('_var18921').with_type(TInt()), '-', ENum(1).with_type(TInt())).with_type(TInt()), '[remove] new value for _var18921'),
-                Query('_query19231', 'internal', [('n', TInt())], (), EFilter(EUnaryOp('distinct', EBinOp(EVar('_var27').with_type(TBag(TInt())), '-', ESingleton(EVar('n').with_type(TInt())).with_type(TBag(TInt()))).with_type(TBag(TInt()))).with_type(TBag(TInt())), ELambda(EVar('_var18920').with_type(TInt()), EBinOp(EBool(False).with_type(TBool()), 'or', EUnaryOp('not', EBinOp(EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var18920').with_type(TInt())).with_type(TInt()), '==', EUnaryOp('len', EFilter(EFilter(EVar('_var27').with_type(TBag(TInt())), ELambda(EVar('_var65248').with_type(TInt()), EUnaryOp('not', EBinOp(EVar('_var65248').with_type(TInt()), '==', EVar('n').with_type(TInt())).with_type(TBool())).with_type(TBool()))).with_type(TBag(TInt())), ELambda(EVar('_var13489').with_type(TInt()), EBinOp(EVar('_var18920').with_type(TInt()), '==', EVar('_var13489').with_type(TInt())).with_type(TBool()))).with_type(TBag(TInt()))).with_type(TInt())).with_type(TBool())).with_type(TBool())).with_type(TBool()))).with_type(TBag(TInt())), '[remove] new or modified keys from _var14938'),
-                Op('add', [('n', TInt())], [], SSeq(SSeq(SDecl('_var220817', ECall('_query2702', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))), SDecl('_var220819', EMakeMap2(ECall('_query42', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), ELambda(EVar('_var15437').with_type(TInt()), ECall('_query15748', (EVar('n').with_type(TInt()), EVar('_var15437').with_type(TInt()), EMapGet(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt())).with_type(TInt()))).with_type(TInt()))).with_type(TMap(TInt(), TInt())))), SSeq(SSeq(SForEach(EVar('_var2601').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapDel(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var2601').with_type(TInt()))), SForEach(EVar('_var2601').with_type(TInt()), EVar('_var220817').with_type(TBag(TInt())), SMapUpdate(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var2601').with_type(TInt()), EVar('_var2602').with_type(TBool()), SNoOp()))), SSeq(SSeq(SForEach(EVar('_var15437').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapDel(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt()))), SForEach(EVar('_var15437').with_type(TInt()), ECall('_query42', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapUpdate(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt()), EVar('_var15438').with_type(TInt()), SAssign(EVar('_var15438').with_type(TInt()), EMapGet(EVar('_var220819').with_type(TMap(TInt(), TInt())), EVar('_var15437').with_type(TInt())).with_type(TInt()))))), SSeq(SForEach(EVar('_var44').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'remove', (EVar('_var44').with_type(TInt()),))), SForEach(EVar('_var44').with_type(TInt()), ECall('_query42', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'add', (EVar('_var44').with_type(TInt()),))))))), ''),
-                Op('remove', [('n', TInt())], [], SSeq(SSeq(SDecl('_var220820', ECall('_query3619', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))), SSeq(SDecl('_var220821', ECall('_query19231', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))), SDecl('_var220822', ECall('_query92', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt()))))), SSeq(SSeq(SForEach(EVar('_var3617').with_type(TInt()), ECall('_query3619', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapDel(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var3617').with_type(TInt()))), SForEach(EVar('_var3617').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SMapUpdate(EVar('_var2428').with_type(TMap(TInt(), TBool())), EVar('_var3617').with_type(TInt()), EVar('_var3618').with_type(TBool()), SNoOp()))), SSeq(SSeq(SForEach(EVar('_var18920').with_type(TInt()), EVar('_var220820').with_type(TBag(TInt())), SMapDel(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var18920').with_type(TInt()))), SForEach(EVar('_var18920').with_type(TInt()), EVar('_var220821').with_type(TBag(TInt())), SMapUpdate(EVar('_var14938').with_type(TMap(TInt(), TInt())), EVar('_var18920').with_type(TInt()), EVar('_var18921').with_type(TInt()), SAssign(EVar('_var18921').with_type(TInt()), ECall('_query19227', (EVar('n').with_type(TInt()), EVar('_var18920').with_type(TInt()), EVar('_var18921').with_type(TInt()))).with_type(TInt()))))), SSeq(SForEach(EVar('_var93').with_type(TInt()), EVar('_var220822').with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'remove', (EVar('_var93').with_type(TInt()),))), SForEach(EVar('_var93').with_type(TInt()), ECall('_query43', (EVar('n').with_type(TInt()),)).with_type(TBag(TInt())), SCall(EVar('_var27').with_type(TBag(TInt())), 'add', (EVar('_var93').with_type(TInt()),))))))), ''),
-            ],
-            # header
-            '',
-            # footer
-            '',
-            # docstring
-            ''
-        )
+    def render_complete(self, *, spec: Spec, state_map, share_info):
         if len(spec.extern_funcs) > 0:
             raise NotImplementedError
         if len(spec.assumptions) > 0:
@@ -108,71 +151,36 @@ class JavaPrinter:
             raise NotImplementedError
         if len(spec.docstring) > 0:
             raise NotImplementedError
-        # debug(state_map)
-        example_state_map = OrderedDict([
-            (
-                '_var27',
-                EVar('l').with_type(TBag(TInt()))
-            ),
-            (
-                '_var2428',
-                EMakeMap2(
-                    EVar('l').with_type(TBag(TInt())),
-                    ELambda(EVar('_var2010').with_type(TInt()), EBool(True).with_type(TBool()))
-                ).with_type(TMap(TInt(), TBool()))
-            ),
-            (
-                '_var14938',
-                EMakeMap2(
-                    EVar('l').with_type(TBag(TInt())),
-                    ELambda(
-                        EVar('_var13488').with_type(TInt()),
-                        EUnaryOp('len',
-                            EFilter(
-                                EVar('l').with_type(TBag(TInt())),
-                                ELambda(
-                                    EVar('_var13489').with_type(TInt()),
-                                    EBinOp(EVar('_var13488').with_type(TInt()), '==', EVar('_var13489').with_type(TInt())).with_type(TBool())
-                                )
-                            ).with_type(TBag(TInt()))
-                        ).with_type(TInt())
-                    )
-                ).with_type(TMap(TInt(), TInt()))
-            ),
-        ])
-        
-        # debug(share_info)
-        # defaultdict(<class 'list'>, {})
         if len(share_info) > 0:
             raise NotImplemented
-        
-        # debug(abstract_state)
-        # [('l', TBag(TInt()))]
-
-
         self.out.write("class {name} {body}".format(
             name = spec.name,
             body = bracketed(self.render_spec(spec)),
         ))
     
+    def visit(self, ):
+        pass
     def render_spec(self, spec: Spec):
         out = ""
-        out += "// types\n"
+        out += java_builtins
+        if len(spec.types) > 0:
+            out += "// types\n"
         for (name, custom) in spec.types:
             if type(custom.value_type) is not TRecord:
                 raise NotImplementedError
             record = custom.value_type
             out += "class {} {}\n".format(name, "{")
             for (fieldname, fieldtype) in record.fields:
-                out += "\tpublic {} {};\n".format(self.render_type(fieldtype), fieldname)
-            out += "\t{}(".format(name)
+                out += "    public {} {};\n".format(self.render_type(fieldtype), fieldname)
+            out += "    {}(".format(name)
             out += ", ".join([self.render_type(fieldtype) + " " + fieldname for (fieldname, fieldtype) in record.fields])
             out += ") {\n"
             for (fieldname, fieldtype) in record.fields:
-                out += "\t\tthis.{f} = {f};\n".format(f = fieldname)
-            out += "\t}\n"
+                out += "        this.{f} = {f};\n".format(f = fieldname)
+            out += "    }\n"
             out += "}\n"
-        out += "// state vars\n"
+        if len(spec.statevars) > 0:
+            out += "// state vars\n"
         for statevar in spec.statevars:
             out += self.render_statevar(statevar) + "\n"
         
@@ -202,7 +210,6 @@ class JavaPrinter:
         )
 
     def render_expr(self, expr: Exp, mapping) -> RenderedExpr:
-        # returns a pair of (setup_code, inline_string).
         # The setup code is several statements, and the inline_string is one Java expression.
         if type(expr) is EVar:
             if expr.id in mapping:
@@ -228,8 +235,30 @@ class JavaPrinter:
                     else:
                         # identity
                         return self.render_expr(expr.e1, mapping)
-            # TODO: deal specially with "-" when they're TBag. (see needs_aux)
-            def correct_op():
+            if expr.op == "-" and type(expr.e1.type) is TBag:
+                # TODO: only generate this method if needed.
+                # will help, sometimes.
+                return self.render_expr(expr.e1, mapping).use(lambda left:
+                    self.render_expr(expr.e2, mapping).use(lambda right:
+                        RenderedExpr(inline = "{}.subtract({})".format(left, right))
+                    )
+                )
+            if expr.op == "+" and type(expr.e1.type) is TBag:
+                # TODO: only generate this method if needed
+                return self.render_expr(expr.e1, mapping).use(lambda left:
+                    self.render_expr(expr.e2, mapping).use(lambda right:
+                        RenderedExpr(inline = "{}.union({})".format(left, right))
+                    )
+                )
+            if expr.op == "in":
+                return self.render_expr(expr.e1, mapping).use(lambda item:
+                    self.render_expr(expr.e2, mapping).use(lambda collection:
+                        RenderedExpr(inline = "{}.contains({})".format(item, collection))
+                    )
+                )
+            if type(expr.e1.type) not in [TInt, TLong, TBool, TFloat]:
+                raise NotImplementedError("the operator '{}' is not supported for expressions of type {}".format(expr.op, repr(expr.e1.type)))
+            def render_op():
                 if expr.op == "or":
                     return "||"
                 if expr.op == "and":
@@ -237,17 +266,81 @@ class JavaPrinter:
                 return expr.op
             return self.render_expr(expr.e1, mapping).use(lambda left:
                 self.render_expr(expr.e2, mapping).use(lambda right:
-                    RenderedExpr(inline = "({} {} {})".format(left, correct_op(), right))
+                    RenderedExpr(inline = "({} {} {})".format(left, render_op(), right))
                 )
             )
         elif type(expr) is EUnaryOp:
-            template = "({op} {arg})"
             if expr.op == "len":
+                # TODO: allow alternatives based on type
                 template = "{arg}.size()"
-            if expr.op == "not":
+            elif expr.op == "empty":
+                # TODO: allow faster alternatives based on type
+                template = "({arg}.size() == 0)"
+            elif expr.op == "distinct":
+                if type(expr.e.type) is not TBag:
+                    raise NotImplementedError("unary operator 'distinct' is only implemented on bags, but it's applied to {}".format(repr(expr)))
+                # TODO: allow alternatives based on type
+                template = "{arg}.distinct()"
+            elif expr.op == "not":
+                if type(expr.e.type) is not TBool:
+                    raise NotImplementedError("unary operator 'not' is only implemented on bools, but it's applied to {}".format(repr(expr)))
                 if type(expr.e) is EBinOp and expr.e.op == "==":
+                    # specialize !(a == b) as a!=b.
                     return self.render_expr(EBinOp(expr.e.e1, "!=", expr.e.e2).with_type(expr.type), mapping)
                 template = "(!{arg})"
+            elif expr.op == "sum":
+                if type(expr.type) not in [TInt, TLong, TFloat]:
+                    raise NotImplementedError("unary operator '{}' not implemented on {} of type {}".format(expr.op, repr(expr.e), rep(expr.type)))
+                sum_into = self.fresh_temporary("sum")
+                sum_type = self.render_type(expr.type)
+                item = self.fresh_temporary("term")
+                return self.render_expr(expr.e, mapping).use(lambda collection:
+                    RenderedExpr(
+                        setup = combine_code(
+                            "{} {} = 0;".format(sum_type, sum_into),
+                            "for ({} {} : {})".format(sum_type, item, collection) + bracketed(
+                                "{} += {};".format(sum_into, item)
+                            ),
+                        ),
+                        inline = sum_into,
+                    )
+                )
+            elif expr.op == "all":
+                if type(expr.type) not in [TBool]:
+                    raise NotImplementedError("unary operator '{}' not implemented on {} of type {}".format(expr.op, repr(expr.e), repr(expr.type)))
+                all_into = self.fresh_temporary("all")
+                item = self.fresh_temporary("term")
+                return self.render_expr(expr.e, mapping).use(lambda collection:
+                    RenderedExpr(
+                        setup = combine_code(
+                            "Boolean {} = true;".format(all_into),
+                            "for (Boolean {} : {})".format(item, collection) + bracketed(
+                                "{} = {} && {};".format(all_into, all_into, item)
+                            ),
+                        ),
+                        inline = all_into,
+                    )
+                )
+            elif expr.op == "any":
+                if type(expr.type) not in [TBool]:
+                    raise NotImplementedError("unary operator '{}' not implemented on {} of type {}".format(expr.op, repr(expr.e), repr(expr.type)))
+                all_into = self.fresh_temporary("any")
+                item = self.fresh_temporary("term")
+                return self.render_expr(expr.e, mapping).use(lambda collection:
+                    RenderedExpr(
+                        setup = combine_code(
+                            "Boolean {} = false;".format(all_into),
+                            "for (Boolean {} : {})".format(item, collection) + bracketed(
+                                "{} = {} || {};".format(all_into, all_into, item)
+                            ),
+                        ),
+                        inline = all_into,
+                    )
+                )
+            elif expr.op == "-":
+                template = "(-{arg})"
+            else:
+                raise NotImplementedError("unary operator '{}' not implemented on {}".format(expr.op, repr(expr.e)))
             return self.render_expr(expr.e, mapping).use(lambda val:
                 RenderedExpr(inline = template.format(arg = val, op = expr.op))
             )
@@ -291,7 +384,7 @@ class JavaPrinter:
         elif type(expr) is EMapGet:
             return self.render_expr(expr.map, mapping).use(lambda m:
                 self.render_expr(expr.key, mapping).use(lambda k:
-                    RenderedExpr(inline = "{}.get({})".format(map_inline, key_inline))
+                    RenderedExpr(inline = "{}.get({})".format(m, k))
                 )
             )
         elif type(expr) is ENum:
@@ -320,7 +413,7 @@ class JavaPrinter:
                 new_mapping[v] = mapping[v]
             new_mapping[expr.p.arg.id] = item
             lambda_body = self.render_expr(expr.p.body, new_mapping)
-            item_addition_code = combine_code(lambda_body.setup, "if ({cond}) {open_brace}\n\t{col}.add({item});\n{close_brace}".format(cond = lambda_body.inline, col = result, open_brace="{", close_brace="}", item = item))
+            item_addition_code = combine_code(lambda_body.setup, "if ({cond}) {open_brace}\n    {col}.add({item});\n{close_brace}".format(cond = lambda_body.inline, col = result, open_brace="{", close_brace="}", item = item))
             filtering_code = "{result_type} {result} = new {result_type}();\nfor ({item_type} {item} : {bag_inline}) {inside}".format(
                 result_type = self.render_type(expr.type),
                 bag_inline = bag.inline,
@@ -330,6 +423,41 @@ class JavaPrinter:
                 inside = bracketed(item_addition_code),
             )
             return RenderedExpr(setup = combine_code(bag.setup, filtering_code), inline = result)
+        elif type(expr) is EArgMin:
+            
+            if type(expr.f) is not ELambda:
+                raise RuntimeError("EFilter with non-lambda filter")
+            argmin = self.fresh_temporary("argmin")
+            argscore = self.fresh_temporary("score")
+            candidate = self.fresh_temporary("candidate")
+            candidatescore = self.fresh_temporary("candidate_score")
+
+            item_type = self.render_type(expr.type)
+            score_type = self.render_type(expr.f.body.type)
+            new_mapping = {}
+            for v in mapping:
+                new_mapping[v] = mapping[v]
+            new_mapping[expr.f.arg.id] = candidate
+
+            collection_rendered = self.render_expr(expr.e, mapping)
+            body_rendered = self.render_expr(expr.f.body, new_mapping)
+
+            return RenderedExpr(
+                setup = combine_code(
+                    collection_rendered.setup,
+                    "{} {} = null;".format(item_type, argmin),
+                    "{} {} = null;".format(score_type, argscore),
+                    "for ({} {} : {}) ".format(item_type, candidate, collection_rendered.inline) + bracketed(
+                        body_rendered.setup,
+                        "{} {} = {};".format(score_type, candidatescore, body_rendered.inline),
+                        "if ({} == null || {} < {}) ".format(argmin, candidatescore, argscore) + bracketed(
+                            "{} = {};".format(argmin, candidate),
+                            "{} = {};".format(argscore, candidatescore),
+                        ),
+                    )
+                ),
+                inline = argmin,
+            )
         elif type(expr) is EMap:
             # first, build the bag
             bag = self.render_expr(expr.e, mapping)
@@ -388,9 +516,8 @@ class JavaPrinter:
             )
         elif type(expr) is EEmptyList:
             return RenderedExpr(inline = "new {}()".format(self.render_type(expr.type)))
-        
-        debug(expr)
-        raise NotImplementedError
+
+        raise NotImplementedError("can't generate code for expression {} of type {}".format(repr(expr), type(expr)))
     def render_expr_return_block(self, expr: Exp):
         rendered = self.render_expr(expr, {})
         return bracketed(combine_code(rendered.setup, "return {};".format(rendered.inline)))
@@ -404,10 +531,13 @@ class JavaPrinter:
         elif type(stmt) is SCall:
             if type(stmt.target) is not EVar:
                 raise NotImplementedError
-            call = self.render_expr(ECall(stmt.func, stmt.args).with_type(stmt.target.type), {})
-            return combine_code(call.setup, "{} = {};".format(stmt.target.id, call.inline))
+            rendered = self.render_expr(stmt.target, {}).use(lambda target:
+                rendered_expr_list([self.render_expr(arg, {}) for arg in stmt.args]).use(lambda args:
+                    RenderedExpr(inline = "{}.{}({})".format(target, stmt.func, ", ".join(args)))
+                )
+            )
+            return combine_code(rendered.setup, rendered.inline + ";")
         elif type(stmt) is SDecl:
-            debug(stmt.val)
             init = self.render_expr(stmt.val, {})
             return combine_code(init.setup, "{} {} = {};".format(self.render_type(stmt.val.type), stmt.id, init.inline))
         elif type(stmt) is SForEach:
@@ -483,8 +613,8 @@ class JavaPrinter:
         elif type(atype) is THandle:
             return atype.statevar # TODO: this is a terrible name
         elif type(atype) is TBag:
-            # TODO: make it a HashMap<{item}, Integer>.
-            return "java.util.ArrayList<{item}>".format(item = self.render_type(atype.t))
+            # We provide our own bag, so that it has a uniform interface.
+            return "Bag<{item}>".format(item = self.render_type(atype.t))
         elif type(atype) is TSet:
             return "java.util.HashSet<{key}>".format(key = self.render_type(atype.t))
         elif type(atype) is TList:
